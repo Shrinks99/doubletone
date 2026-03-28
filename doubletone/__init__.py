@@ -230,15 +230,21 @@ def main():
         log.info(f"low-pass cutoff: {lowpass_cutoff:.4f} cycles/pixel "
                  f"({args.lowpass:.0%} of screen frequency)")
 
+    # pad edges to reduce border ringing (a few halftone periods)
+    if screen_freq > 0:
+        pad_width = int(np.ceil(3.0 / screen_freq))
+    else:
+        pad_width = 32
+
     log.info("descreening channels via FFT filtering")
     c = descreen_channel_fft(cmy[:, :, 0], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
+                             lowpass_cutoff, args.lowpass_order, pad_width)
     m = descreen_channel_fft(cmy[:, :, 1], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
+                             lowpass_cutoff, args.lowpass_order, pad_width)
     y = descreen_channel_fft(cmy[:, :, 2], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
+                             lowpass_cutoff, args.lowpass_order, pad_width)
     k = descreen_channel_fft(k, peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
+                             lowpass_cutoff, args.lowpass_order, pad_width)
     k **= 2.0  # reduce darkening from black being "double counted"
     del cmy
 
@@ -479,8 +485,24 @@ def auto_detect_screen(image_linear_rgb, detection_threshold=4.0, max_harmonics=
     return screen_freq, peak_locations
 
 
+def remap_peaks(peak_locations, orig_shape, padded_shape):
+    """Remap unshifted FFT peak coordinates from orig_shape to padded_shape."""
+    H, W = orig_shape
+    Hp, Wp = padded_shape
+    remapped = []
+    for (py, px) in peak_locations:
+        # convert to signed frequency index
+        fy = py if py <= H // 2 else py - H
+        fx = px if px <= W // 2 else px - W
+        # map to padded coordinates
+        ny = round(fy * Hp / H) % Hp
+        nx = round(fx * Wp / W) % Wp
+        remapped.append((ny, nx))
+    return remapped
+
+
 def descreen_channel_fft(channel, peak_locations, notch_radius=3.0,
-                         lowpass_cutoff=0.0, lowpass_order=4):
+                         lowpass_cutoff=0.0, lowpass_order=4, pad_width=0):
     """Remove halftone pattern from a channel using FFT notch + low-pass filtering.
 
     Args:
@@ -489,9 +511,15 @@ def descreen_channel_fft(channel, peak_locations, notch_radius=3.0,
         lowpass_cutoff: cutoff frequency in cycles/pixel for Butterworth low-pass
                         (0 disables the low-pass)
         lowpass_order: steepness of the Butterworth rolloff
+        pad_width: pixels of edge-padding to add before FFT (reduces border artifacts)
     """
     if not peak_locations and lowpass_cutoff <= 0:
         return channel
+
+    orig_H, orig_W = channel.shape
+    if pad_width > 0:
+        channel = np.pad(channel, pad_width, mode='reflect')
+        peak_locations = remap_peaks(peak_locations, (orig_H, orig_W), channel.shape)
 
     H, W = channel.shape
     F = scipy.fft.fft2(channel.astype(np.float32), workers=-1)
@@ -499,8 +527,9 @@ def descreen_channel_fft(channel, peak_locations, notch_radius=3.0,
     mask = np.ones((H, W), dtype=np.float32)
 
     # notch filters for detected peaks
+    # scale sigma to account for finer frequency bins in the padded image
     if peak_locations:
-        sigma = notch_radius
+        sigma = notch_radius * (H / orig_H + W / orig_W) / 2
         patch_radius = int(np.ceil(4 * sigma))
 
         for (py, px) in peak_locations:
@@ -534,7 +563,12 @@ def descreen_channel_fft(channel, peak_locations, notch_radius=3.0,
 
     F_filtered = F * mask
     result = np.real(scipy.fft.ifft2(F_filtered))
-    return np.clip(result, 0.0, None)
+    result = np.clip(result, 0.0, None)
+
+    if pad_width > 0:
+        result = result[pad_width:-pad_width, pad_width:-pad_width]
+
+    return result
 
 
 def build_peaks_from_manual_params(screen_freq, angles_turns, image_shape, max_harmonics=4):
