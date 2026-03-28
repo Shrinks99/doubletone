@@ -16,160 +16,161 @@ def hex_color(hex):
     return np.array([int(m[i], base=16) for i in [3, 2, 1]], dtype=np.float32) / 255.0
 
 
-parser = argparse.ArgumentParser(
-    description="Filters a halftone pattern to produce an image more suitable for digital displays"
-)
-parser.add_argument("image", help="Image to filter")
-parser.add_argument(
-    "-l",
-    "--log-level",
-    help="Verbosity of logging",
-    choices=("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"),
-    type=str.upper,
-    default=log.INFO,
-)
-parser.add_argument(
-    "-c",
-    "--cyan-in",
-    help="Color of cyan in input image",
-    type=hex_color,
-    default="#00ffff",
-)
-parser.add_argument(
-    "-m",
-    "--magenta-in",
-    help="Color of magenta in input image",
-    type=hex_color,
-    default="#ff00ff",
-)
-parser.add_argument(
-    "-y",
-    "--yellow-in",
-    help="Color of yellow in input image",
-    type=hex_color,
-    default="#ffff00",
-)
-parser.add_argument(
-    "-k",
-    "--black-in",
-    help="Color of black in input image",
-    type=hex_color,
-    default="#000000",
-)
-parser.add_argument(
-    "-C",
-    "--cyan-out",
-    help="Color of cyan in output image",
-    type=hex_color,
-    default=None,
-)
-parser.add_argument(
-    "-M",
-    "--magenta-out",
-    help="Color of magenta in output image",
-    type=hex_color,
-    default=None,
-)
-parser.add_argument(
-    "-Y",
-    "--yellow-out",
-    help="Color of yellow in output image",
-    type=hex_color,
-    default=None,
-)
-parser.add_argument(
-    "-K",
-    "--black-out",
-    help="Color of black in output image",
-    type=hex_color,
-    default=None,
-)
-parser.add_argument(
-    "-t",
-    "--black-threshold",
-    help="Threshold to consider pixel black",
-    type=float,
-    default=0.1,
-)
-parser.add_argument(
-    "-o",
-    "--output",
-    help="Output file path",
-    type=str,
-    default="filtered.png",
-)
-parser.add_argument(
-    "--notch-radius",
-    help="Sigma of Gaussian notch filters in frequency bins (larger = more aggressive)",
-    type=float,
-    default=3.0,
-)
-parser.add_argument(
-    "--lowpass",
-    help="Apply a Butterworth low-pass at this fraction of the detected screen frequency "
-    "(e.g. 0.9 cuts just below the halftone fundamental; 0 disables). "
-    "Catches all halftone energy including cross-products and harmonics.",
-    type=float,
-    default=0.9,
-)
-parser.add_argument(
-    "--lowpass-order",
-    help="Steepness of the low-pass rolloff (higher = sharper cutoff)",
-    type=int,
-    default=4,
-)
-parser.add_argument(
-    "--max-harmonics",
-    help="Number of harmonic orders to suppress beyond fundamentals",
-    type=int,
-    default=4,
-)
-parser.add_argument(
-    "--detection-threshold",
-    help="Peak detection sensitivity in standard deviations above mean",
-    type=float,
-    default=4.0,
-)
-parser.add_argument(
-    "--screen-freq",
-    help="Override auto-detected screen frequency (cycles/pixel)",
-    type=float,
-    default=None,
-)
-parser.add_argument(
-    "--no-auto-detect",
-    help="Disable auto-detection; requires --screen-freq and angle arguments",
-    action="store_true",
-)
-parser.add_argument(
-    "--cyan-angle",
-    help="Angle of halftone screen for cyan in turns (used with --no-auto-detect)",
-    type=float,
-    default=3 / 16,
-)
-parser.add_argument(
-    "--magenta-angle",
-    help="Angle of halftone screen for magenta in turns (used with --no-auto-detect)",
-    type=float,
-    default=2 / 16,
-)
-parser.add_argument(
-    "--yellow-angle",
-    help="Angle of halftone screen for yellow in turns (used with --no-auto-detect)",
-    type=float,
-    default=0,
-)
-parser.add_argument(
-    "--black-angle",
-    help="Angle of halftone screen for black in turns (used with --no-auto-detect)",
-    type=float,
-    default=1 / 16,
-)
-parser.add_argument(
-    "--debug-spectrum",
-    help="Save debug images of the frequency spectrum with detected peaks",
-    action="store_true",
-)
+def main():
+    parser = argparse.ArgumentParser(
+        description="Filters a halftone pattern to produce an image more suitable for digital displays"
+    )
+    parser.add_argument("image", help="Image to filter")
+    parser.add_argument(
+        "-l",
+        "--log-level",
+        help="Verbosity of logging",
+        choices=("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"),
+        type=str.upper,
+        default=log.INFO,
+    )
+    parser.add_argument(
+        "-c",
+        "--cyan-in",
+        help="Color of cyan in input image",
+        type=hex_color,
+        default="#00ffff",
+    )
+    parser.add_argument(
+        "-m",
+        "--magenta-in",
+        help="Color of magenta in input image",
+        type=hex_color,
+        default="#ff00ff",
+    )
+    parser.add_argument(
+        "-y",
+        "--yellow-in",
+        help="Color of yellow in input image",
+        type=hex_color,
+        default="#ffff00",
+    )
+    parser.add_argument(
+        "-k",
+        "--black-in",
+        help="Color of black in input image",
+        type=hex_color,
+        default="#000000",
+    )
+    parser.add_argument(
+        "-C",
+        "--cyan-out",
+        help="Color of cyan in output image",
+        type=hex_color,
+        default=None,
+    )
+    parser.add_argument(
+        "-M",
+        "--magenta-out",
+        help="Color of magenta in output image",
+        type=hex_color,
+        default=None,
+    )
+    parser.add_argument(
+        "-Y",
+        "--yellow-out",
+        help="Color of yellow in output image",
+        type=hex_color,
+        default=None,
+    )
+    parser.add_argument(
+        "-K",
+        "--black-out",
+        help="Color of black in output image",
+        type=hex_color,
+        default=None,
+    )
+    parser.add_argument(
+        "-t",
+        "--black-threshold",
+        help="Threshold to consider pixel black",
+        type=float,
+        default=0.1,
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Output file path",
+        type=str,
+        default="filtered.png",
+    )
+    parser.add_argument(
+        "--notch-radius",
+        help="Sigma of Gaussian notch filters in frequency bins (larger = more aggressive)",
+        type=float,
+        default=3.0,
+    )
+    parser.add_argument(
+        "--lowpass",
+        help="Apply a Butterworth low-pass at this fraction of the detected screen frequency "
+        "(e.g. 0.9 cuts just below the halftone fundamental; 0 disables). "
+        "Catches all halftone energy including cross-products and harmonics.",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
+        "--lowpass-order",
+        help="Steepness of the low-pass rolloff (higher = sharper cutoff)",
+        type=int,
+        default=4,
+    )
+    parser.add_argument(
+        "--max-harmonics",
+        help="Number of harmonic orders to suppress beyond fundamentals",
+        type=int,
+        default=4,
+    )
+    parser.add_argument(
+        "--detection-threshold",
+        help="Peak detection sensitivity in standard deviations above mean",
+        type=float,
+        default=4.0,
+    )
+    parser.add_argument(
+        "--screen-freq",
+        help="Override auto-detected screen frequency (cycles/pixel)",
+        type=float,
+        default=None,
+    )
+    parser.add_argument(
+        "--no-auto-detect",
+        help="Disable auto-detection; requires --screen-freq and angle arguments",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--cyan-angle",
+        help="Angle of halftone screen for cyan in turns (used with --no-auto-detect)",
+        type=float,
+        default=3 / 16,
+    )
+    parser.add_argument(
+        "--magenta-angle",
+        help="Angle of halftone screen for magenta in turns (used with --no-auto-detect)",
+        type=float,
+        default=2 / 16,
+    )
+    parser.add_argument(
+        "--yellow-angle",
+        help="Angle of halftone screen for yellow in turns (used with --no-auto-detect)",
+        type=float,
+        default=0,
+    )
+    parser.add_argument(
+        "--black-angle",
+        help="Angle of halftone screen for black in turns (used with --no-auto-detect)",
+        type=float,
+        default=1 / 16,
+    )
+    parser.add_argument(
+        "--debug-spectrum",
+        help="Save debug images of the frequency spectrum with detected peaks",
+        action="store_true",
+    )
 
 
 def intensity_from_srgb(image):
@@ -514,7 +515,6 @@ def save_image(path, image):
     iio.imwrite(path, (image * 255.0).round().clip(0.0, 255.0).astype(np.uint8))
 
 
-if __name__ == "__main__":
     args = parser.parse_args()
     handle_default_colors_out(args)
     log.basicConfig(level=args.log_level)
@@ -604,3 +604,7 @@ if __name__ == "__main__":
 
     log.info("writing out filtered image")
     save_image(args.output, combined)
+
+
+if __name__ == "__main__":
+    main()

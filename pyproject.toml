@@ -14,5 +14,8 @@ dependencies = [
     "scipy>=1.17.1",
 ]
 
+[project.scripts]
+doubletone = "doubletone:main"
+
 [project.urls]
 Repository = "https://github.com/Shrinks99/doubletone"
