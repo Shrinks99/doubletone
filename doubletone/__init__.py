@@ -172,6 +172,96 @@ def main():
         action="store_true",
     )
 
+    args = parser.parse_args()
+    handle_default_colors_out(args)
+    log.basicConfig(level=args.log_level)
+
+    log.info("loading image")
+    image = load_image(args.image)
+
+    log.info("converting to linear RGB")
+    bgr_intensity = intensity_from_srgb(image)
+    del image
+
+    # detect halftone parameters
+    screen_freq = 0.0
+    if args.no_auto_detect:
+        if args.screen_freq is None:
+            log.critical("--screen-freq is required when using --no-auto-detect")
+            exit(1)
+        log.info("using manual halftone parameters")
+        screen_freq = args.screen_freq
+        angles = [args.cyan_angle, args.magenta_angle, args.yellow_angle, args.black_angle]
+        peak_locations = build_peaks_from_manual_params(
+            screen_freq, angles, bgr_intensity.shape[:2], args.max_harmonics
+        )
+    else:
+        log.info("detecting halftone parameters")
+        screen_freq, peak_locations = auto_detect_screen(
+            bgr_intensity, args.detection_threshold, args.max_harmonics
+        )
+        if screen_freq > 0:
+            log.info(f"detected screen frequency: {screen_freq:.4f} cycles/pixel")
+        log.info(f"detected {len(peak_locations)} frequency peaks to suppress")
+        if len(peak_locations) < 2:
+            log.warning("few halftone peaks detected; image may not be halftoned")
+
+    if args.debug_spectrum:
+        luminance = (
+            0.2126 * bgr_intensity[:, :, 0]
+            + 0.7152 * bgr_intensity[:, :, 1]
+            + 0.0722 * bgr_intensity[:, :, 2]
+        )
+        save_debug_spectrum(luminance, peak_locations, "debug_spectrum.png")
+        log.info("saved debug spectrum to debug_spectrum.png")
+
+    log.info("converting to CMYK")
+    cmy = cmy_from_bgr(bgr_intensity, args.cyan_in, args.magenta_in, args.yellow_in)
+    black_intensity = intensity_from_srgb(args.black_in)
+    k = (
+        np.linalg.norm(bgr_intensity - black_intensity, axis=2) < args.black_threshold
+    ).astype(np.float32)
+    del bgr_intensity
+
+    # compute low-pass cutoff from detected screen frequency
+    lowpass_cutoff = 0.0
+    if args.lowpass > 0 and screen_freq > 0:
+        lowpass_cutoff = args.lowpass * screen_freq
+        log.info(f"low-pass cutoff: {lowpass_cutoff:.4f} cycles/pixel "
+                 f"({args.lowpass:.0%} of screen frequency)")
+
+    log.info("descreening channels via FFT filtering")
+    c = descreen_channel_fft(cmy[:, :, 0], peak_locations, args.notch_radius,
+                             lowpass_cutoff, args.lowpass_order)
+    m = descreen_channel_fft(cmy[:, :, 1], peak_locations, args.notch_radius,
+                             lowpass_cutoff, args.lowpass_order)
+    y = descreen_channel_fft(cmy[:, :, 2], peak_locations, args.notch_radius,
+                             lowpass_cutoff, args.lowpass_order)
+    k = descreen_channel_fft(k, peak_locations, args.notch_radius,
+                             lowpass_cutoff, args.lowpass_order)
+    k **= 2.0  # reduce darkening from black being "double counted"
+    del cmy
+
+    log.info("re-combining CMYK")
+    filtered = np.stack([c, m, y], axis=2)
+    del c, m, y
+
+    combined_intensity = bgr_from_cmy(
+        filtered, args.cyan_out, args.magenta_out, args.yellow_out
+    )
+    black_out_intensity = intensity_from_srgb(args.black_out)
+    combined_intensity = (
+        np.expand_dims(1 - k, axis=2) * combined_intensity
+        + np.expand_dims(k, axis=2) * np.expand_dims(black_out_intensity, axis=(0, 1))
+    )
+    del k
+
+    combined = srgb_from_intensity(combined_intensity)
+    del combined_intensity
+
+    log.info("writing out filtered image")
+    save_image(args.output, combined)
+
 
 def intensity_from_srgb(image):
     gamma = 2.4
@@ -513,97 +603,6 @@ def load_image(path):
 
 def save_image(path, image):
     iio.imwrite(path, (image * 255.0).round().clip(0.0, 255.0).astype(np.uint8))
-
-
-    args = parser.parse_args()
-    handle_default_colors_out(args)
-    log.basicConfig(level=args.log_level)
-
-    log.info("loading image")
-    image = load_image(args.image)
-
-    log.info("converting to linear RGB")
-    bgr_intensity = intensity_from_srgb(image)
-    del image
-
-    # detect halftone parameters
-    screen_freq = 0.0
-    if args.no_auto_detect:
-        if args.screen_freq is None:
-            log.critical("--screen-freq is required when using --no-auto-detect")
-            exit(1)
-        log.info("using manual halftone parameters")
-        screen_freq = args.screen_freq
-        angles = [args.cyan_angle, args.magenta_angle, args.yellow_angle, args.black_angle]
-        peak_locations = build_peaks_from_manual_params(
-            screen_freq, angles, bgr_intensity.shape[:2], args.max_harmonics
-        )
-    else:
-        log.info("detecting halftone parameters")
-        screen_freq, peak_locations = auto_detect_screen(
-            bgr_intensity, args.detection_threshold, args.max_harmonics
-        )
-        if screen_freq > 0:
-            log.info(f"detected screen frequency: {screen_freq:.4f} cycles/pixel")
-        log.info(f"detected {len(peak_locations)} frequency peaks to suppress")
-        if len(peak_locations) < 2:
-            log.warning("few halftone peaks detected; image may not be halftoned")
-
-    if args.debug_spectrum:
-        luminance = (
-            0.2126 * bgr_intensity[:, :, 0]
-            + 0.7152 * bgr_intensity[:, :, 1]
-            + 0.0722 * bgr_intensity[:, :, 2]
-        )
-        save_debug_spectrum(luminance, peak_locations, "debug_spectrum.png")
-        log.info("saved debug spectrum to debug_spectrum.png")
-
-    log.info("converting to CMYK")
-    cmy = cmy_from_bgr(bgr_intensity, args.cyan_in, args.magenta_in, args.yellow_in)
-    black_intensity = intensity_from_srgb(args.black_in)
-    k = (
-        np.linalg.norm(bgr_intensity - black_intensity, axis=2) < args.black_threshold
-    ).astype(np.float32)
-    del bgr_intensity
-
-    # compute low-pass cutoff from detected screen frequency
-    lowpass_cutoff = 0.0
-    if args.lowpass > 0 and screen_freq > 0:
-        lowpass_cutoff = args.lowpass * screen_freq
-        log.info(f"low-pass cutoff: {lowpass_cutoff:.4f} cycles/pixel "
-                 f"({args.lowpass:.0%} of screen frequency)")
-
-    log.info("descreening channels via FFT filtering")
-    c = descreen_channel_fft(cmy[:, :, 0], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
-    m = descreen_channel_fft(cmy[:, :, 1], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
-    y = descreen_channel_fft(cmy[:, :, 2], peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
-    k = descreen_channel_fft(k, peak_locations, args.notch_radius,
-                             lowpass_cutoff, args.lowpass_order)
-    k **= 2.0  # reduce darkening from black being "double counted"
-    del cmy
-
-    log.info("re-combining CMYK")
-    filtered = np.stack([c, m, y], axis=2)
-    del c, m, y
-
-    combined_intensity = bgr_from_cmy(
-        filtered, args.cyan_out, args.magenta_out, args.yellow_out
-    )
-    black_out_intensity = intensity_from_srgb(args.black_out)
-    combined_intensity = (
-        np.expand_dims(1 - k, axis=2) * combined_intensity
-        + np.expand_dims(k, axis=2) * np.expand_dims(black_out_intensity, axis=(0, 1))
-    )
-    del k
-
-    combined = srgb_from_intensity(combined_intensity)
-    del combined_intensity
-
-    log.info("writing out filtered image")
-    save_image(args.output, combined)
 
 
 if __name__ == "__main__":
