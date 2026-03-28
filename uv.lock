@@ -3,9 +3,9 @@ revision = 3
 requires-python = ">=3.14"
 
 [[package]]
-name = "doubletone-master"
+name = "doubletone"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "imageio" },
     { name = "scipy" },

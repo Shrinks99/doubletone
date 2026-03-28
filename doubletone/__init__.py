@@ -13,7 +13,7 @@ def hex_color(hex):
     m = re.fullmatch(r"#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})", hex)
     if not m:
         raise ValueError("Failed to parse hex color: {hex}")
-    return np.array([int(m[i], base=16) for i in [3, 2, 1]], dtype=np.float32) / 255.0
+    return np.array([int(m[i], base=16) for i in [1, 2, 3]], dtype=np.float32) / 255.0
 
 
 def main():
@@ -180,7 +180,7 @@ def main():
     image = load_image(args.image)
 
     log.info("converting to linear RGB")
-    bgr_intensity = intensity_from_srgb(image)
+    rgb_intensity = intensity_from_srgb(image)
     del image
 
     # detect halftone parameters
@@ -193,12 +193,12 @@ def main():
         screen_freq = args.screen_freq
         angles = [args.cyan_angle, args.magenta_angle, args.yellow_angle, args.black_angle]
         peak_locations = build_peaks_from_manual_params(
-            screen_freq, angles, bgr_intensity.shape[:2], args.max_harmonics
+            screen_freq, angles, rgb_intensity.shape[:2], args.max_harmonics
         )
     else:
         log.info("detecting halftone parameters")
         screen_freq, peak_locations = auto_detect_screen(
-            bgr_intensity, args.detection_threshold, args.max_harmonics
+            rgb_intensity, args.detection_threshold, args.max_harmonics
         )
         if screen_freq > 0:
             log.info(f"detected screen frequency: {screen_freq:.4f} cycles/pixel")
@@ -208,20 +208,20 @@ def main():
 
     if args.debug_spectrum:
         luminance = (
-            0.2126 * bgr_intensity[:, :, 0]
-            + 0.7152 * bgr_intensity[:, :, 1]
-            + 0.0722 * bgr_intensity[:, :, 2]
+            0.2126 * rgb_intensity[:, :, 0]
+            + 0.7152 * rgb_intensity[:, :, 1]
+            + 0.0722 * rgb_intensity[:, :, 2]
         )
         save_debug_spectrum(luminance, peak_locations, "debug_spectrum.png")
         log.info("saved debug spectrum to debug_spectrum.png")
 
     log.info("converting to CMYK")
-    cmy = cmy_from_bgr(bgr_intensity, args.cyan_in, args.magenta_in, args.yellow_in)
-    black_intensity = intensity_from_srgb(args.black_in)
+    cmy = cmy_from_rgb(rgb_intensity, args.cyan_in, args.magenta_in, args.yellow_in)
+    black_intensity = intensity_from_srgb(args.black_in.copy())
     k = (
-        np.linalg.norm(bgr_intensity - black_intensity, axis=2) < args.black_threshold
+        np.linalg.norm(rgb_intensity - black_intensity, axis=2) < args.black_threshold
     ).astype(np.float32)
-    del bgr_intensity
+    del rgb_intensity
 
     # compute low-pass cutoff from detected screen frequency
     lowpass_cutoff = 0.0
@@ -246,10 +246,10 @@ def main():
     filtered = np.stack([c, m, y], axis=2)
     del c, m, y
 
-    combined_intensity = bgr_from_cmy(
+    combined_intensity = rgb_from_cmy(
         filtered, args.cyan_out, args.magenta_out, args.yellow_out
     )
-    black_out_intensity = intensity_from_srgb(args.black_out)
+    black_out_intensity = intensity_from_srgb(args.black_out.copy())
     combined_intensity = (
         np.expand_dims(1 - k, axis=2) * combined_intensity
         + np.expand_dims(k, axis=2) * np.expand_dims(black_out_intensity, axis=(0, 1))
@@ -294,7 +294,7 @@ def srgb_from_intensity(intensity):
     return intensity
 
 
-def cmy_from_bgr(bgr_intensity, cyan, magenta, yellow):
+def cmy_from_rgb(rgb_intensity, cyan, magenta, yellow):
     cmy_srgb = np.array(
         [
             cyan,
@@ -306,12 +306,12 @@ def cmy_from_bgr(bgr_intensity, cyan, magenta, yellow):
     white_intensity = np.array([1.0, 1.0, 1.0])
     basis = white_intensity - cmy_intensity
 
-    cmy = white_intensity - bgr_intensity
+    cmy = white_intensity - rgb_intensity
     cmy = cmy @ np.linalg.inv(basis)
     return cmy
 
 
-def bgr_from_cmy(cmy, cyan, magenta, yellow):
+def rgb_from_cmy(cmy, cyan, magenta, yellow):
     cmy_srgb = np.array(
         [
             cyan,
@@ -323,9 +323,9 @@ def bgr_from_cmy(cmy, cyan, magenta, yellow):
     white_intensity = np.array([1.0, 1.0, 1.0])
     basis = white_intensity - cmy_intensity
 
-    bgr_intensity = cmy @ basis
-    bgr_intensity = white_intensity - bgr_intensity
-    return bgr_intensity
+    rgb_intensity = cmy @ basis
+    rgb_intensity = white_intensity - rgb_intensity
+    return rgb_intensity
 
 
 def detect_halftone_params(channel, detection_threshold=4.0, max_harmonics=4):
@@ -463,8 +463,7 @@ def detect_halftone_params(channel, detection_threshold=4.0, max_harmonics=4):
 
 def auto_detect_screen(image_linear_rgb, detection_threshold=4.0, max_harmonics=4):
     """Detect halftone parameters from the full image using luminance."""
-    # luminance (image is in BGR order internally but RGB from imageio;
-    # the channel order doesn't matter much for detection)
+    # luminance from linear RGB
     if image_linear_rgb.ndim == 3:
         luminance = (
             0.2126 * image_linear_rgb[:, :, 0]
