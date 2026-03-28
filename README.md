@@ -2,8 +2,16 @@ Doubletone removes the halftone pattern from a scan of an image printed with off
 
 ## Usage
 
+Clone the repo and run directly with uv
+
 ```
 uv run doubletone.py image.jpg
+```
+
+or install as a CLI tool
+
+```
+uv tool install -e .
 ```
 
 The script auto-detects the halftone screen frequency and removes it. Output is saved to `filtered.png` by default (override with `-o`).
