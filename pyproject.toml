@@ -1,0 +1,18 @@
+[project]
+name = "doubletone"
+version = "0.1.0"
+description = "Analyze and de-screen halftoned CMYK printed material"
+readme = "README.md"
+license = "CC0-1.0"
+requires-python = ">=3.14"
+authors = [
+    { name = "Henry Wilkinson" },
+    { name = "Grant Moyer" },
+]
+dependencies = [
+    "imageio>=2.37.3",
+    "scipy>=1.17.1",
+]
+
+[project.urls]
+Repository = "https://github.com/Shrinks99/doubletone"
